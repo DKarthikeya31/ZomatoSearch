@@ -93,6 +93,88 @@ sitting, so every design choice below has an actual "before/after" behind it.
 
 `BATCH-8` `LOGGING` `HEALTHCHECK` `HARDENING` — structured logging, `/healthz`, server-level read/write timeouts, jittered cache TTL.
 
+## 🔗 End-to-End Microservices Workflow
+
+This project runs as a single binary for simplicity, but it's designed the
+way a real microservices split would look. Here's how it maps end to end:
+
+1. **Client** sends `GET /search?q=biryani`.
+2. **API Gateway** (in a real split, a separate service) authenticates the
+   request and routes it to the Search Orchestrator.
+3. **Search Orchestrator** checks Redis first (cache-aside). On a hit, it
+   returns immediately — no downstream services are touched.
+4. On a **cache miss**, the orchestrator fans out concurrently to two
+   independent domain services: **Restaurant Service** and **Dish Service**.
+5. Each domain service owns its own data (in a real split: its own DB),
+   and each call is wrapped in a capped retry in case of a transient blip.
+6. The orchestrator merges whatever comes back — even if only one service
+   responded successfully — and returns the combined result to the client.
+7. The result is written back to Redis **asynchronously**, so the client
+   isn't kept waiting on the cache write.
+
+### System context diagram
+Shows the service as a black box and who/what it talks to — a bird's-eye
+view before getting into internals.
+
+```mermaid
+C4Context
+  Person(user, "App user", "Searches for restaurants and dishes")
+  System(search, "Zomato Search Service", "Handles search queries, caching, and result merging")
+  System_Ext(restaurantDB, "Restaurant data store", "Owns restaurant records")
+  System_Ext(dishDB, "Dish data store", "Owns dish records")
+  System_Ext(redis, "Redis", "Cache layer")
+
+  Rel(user, search, "Searches via", "HTTPS")
+  Rel(search, restaurantDB, "Reads from")
+  Rel(search, dishDB, "Reads from")
+  Rel(search, redis, "Reads/writes cache")
+```
+
+### Component diagram
+Zooms into the service itself and its internal building blocks.
+
+```mermaid
+graph TD
+  A[API Gateway] --> B[Search Orchestrator]
+  B --> C[Cache Client]
+  C --> D[(Redis)]
+  B --> E[Restaurant Client]
+  B --> F[Dish Client]
+  E --> G[(Restaurant Service)]
+  F --> H[(Dish Service)]
+```
+
+### Sequence diagram
+Shows the actual request timeline, including the cache-miss branch and
+concurrent fan-out.
+
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant O as Search Orchestrator
+  participant R as Redis
+  participant RS as Restaurant Service
+  participant DS as Dish Service
+
+  C->>O: GET /search?q=biryani
+  O->>R: GET cache key
+  alt cache hit
+    R-->>O: cached result
+    O-->>C: 200 OK (source=cache)
+  else cache miss
+    par concurrent fan-out
+      O->>RS: lookup restaurants
+      RS-->>O: results (or retry on failure)
+    and
+      O->>DS: lookup dishes
+      DS-->>O: results (or retry on failure)
+    end
+    O->>O: merge results
+    O-->>C: 200 OK (source=live)
+    O->>R: SET cache key (async, jittered TTL)
+  end
+```
+
 ## ▶️ Getting Started
 
 ```bash
