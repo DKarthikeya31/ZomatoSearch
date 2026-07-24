@@ -1,4 +1,6 @@
 <div align="center">
+  
+<img src="assets/banner.png" alt="ZomatoSearch banner" width="600">
 
 # 📦 ZomatoSearch
 
