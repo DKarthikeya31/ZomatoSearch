@@ -1,6 +1,4 @@
 <div align="center">
-  
-<img src="assets/search_engine_emblem_banner.png" alt="ZomatoSearch banner" width="600">
 
 # 📦 ZomatoSearch
 
@@ -16,6 +14,8 @@
 ![Status](https://img.shields.io/badge/Status-Personal%20Project-yellow?style=flat)
 
 [Problem](#-problem) · [Solution](#-solution) · [Architecture](#-architecture) · [Build Batches](#-build-batches) · [Getting Started](#-getting-started) · [Interview Notes](#-interview-notes)
+
+<img src="assets/search_engine_emblem_banner.png" alt="ZomatoSearch banner" width="600">
 
 </div>
 
