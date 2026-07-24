@@ -1,74 +1,99 @@
-# zomato-search-service
+<div align="center">
 
-A small backend project where I built a restaurant/dish search service similar to how Zomato or Swiggy's search might work under the hood — focused on making it fast using concurrency and Redis caching, not just "make it work."
+# 📦 ZomatoSearch
 
-I built this because I wanted something on my resume that I could actually defend in an interview, not just a CRUD app. So every part of this — the concurrency, the caching, the retry logic — I built incrementally and timed the before/after myself.
+### Concurrent Search Backend for Restaurant & Dish Discovery
 
-`golang` `redis` `concurrency` `caching` `distributed-systems` `backend`
+*Cutting search latency in half by fanning out restaurant and dish lookups in parallel — with Redis caching and graceful failure handling on top.*
+
+![Go](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat&logo=go&logoColor=white)
+![Redis](https://img.shields.io/badge/Redis-Cache--Aside-DC382D?style=flat&logo=redis&logoColor=white)
+![Concurrency](https://img.shields.io/badge/Concurrency-Goroutines-00ADD8?style=flat)
+![net/http](https://img.shields.io/badge/net%2Fhttp-API-informational?style=flat)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat)
+![Status](https://img.shields.io/badge/Status-Personal%20Project-yellow?style=flat)
+
+[Problem](#-problem) · [Solution](#-solution) · [Architecture](#-architecture) · [Build Batches](#-build-batches) · [Getting Started](#-getting-started) · [Interview Notes](#-interview-notes)
+
+</div>
 
 ---
 
-### Why this exists
+## 🚀 Overview
 
-When you search for a dish or restaurant on an app like Zomato, the backend usually has to:
-- look up matching restaurants
-- look up matching dishes
-- combine them into one result
+A backend search service modeled on how apps like Zomato or Swiggy might
+handle restaurant/dish search — built to actually be fast, not just
+functional. Every optimization here (concurrency, caching, retries,
+graceful degradation) was built incrementally and timed, so the resume
+line behind it is backed by real numbers, not just buzzwords.
 
-Doing this naively (one after the other) is slow. I wanted to actually build something that does this properly — in parallel, with caching so repeated searches don't hit the database again, and in a way that doesn't fall over if one part of the system is having a bad day.
+## 🧩 Problem
 
-### What it does
+A naive search implementation looks up restaurants, then looks up dishes,
+then combines them — sequentially. That means total response time is the
+**sum** of both lookups, and a single slow or failing dependency takes the
+whole request down with it. Neither is acceptable at any real scale.
 
-1. First checks Redis — if this exact search was made recently, return it instantly from cache.
-2. If it's not cached, it fetches restaurant matches and dish matches **at the same time** (goroutines), instead of one after the other.
-3. If one of those lookups fails temporarily, it retries a couple of times before giving up.
-4. If one totally fails and the other succeeds, it still returns whatever it has instead of failing the whole request.
-5. Once it has a result, it saves it to Redis in the background so the *next* search for the same thing is fast.
+## 💡 Solution
 
-### Architecture (roughly)
+- **Fan out, don't queue up.** Restaurant and dish lookups run concurrently
+  as goroutines, so total latency is roughly `max(a, b)` instead of `a + b`.
+- **Cache what's already been asked.** A Redis cache-aside layer returns
+  repeat queries instantly, with a jittered TTL so keys don't all expire in
+  the same instant under load.
+- **Expect things to fail, and don't collapse when they do.** Capped
+  retries recover from transient blips; if one lookup still fails, the
+  response returns whatever the other one found instead of erroring out
+  entirely.
+
+## 🏗️ Architecture
 
 ```
-Client
-  │
-  ▼
-HTTP handler (main.go)
-  │
-  ▼
-Search service
-  │
-  ├── check Redis cache — hit? return immediately
-  │
-  └── miss → run these two at the same time:
-         ├── restaurant lookup (retries if it fails)
-         └── dish lookup (retries if it fails)
-              │
-              combine → respond → save to Redis in background
+                     Client
+                       │  GET /search?q=...
+                       ▼
+            ┌─────────────────────┐
+            │   HTTP Handler        │
+            │   (logging + timeout) │
+            └──────────┬───────────┘
+                       ▼
+            ┌─────────────────────┐
+            │    Search Service     │
+            └──────────┬───────────┘
+                       │
+          ┌────────────┴─────────────┐
+          ▼                          ▼
+   Redis Cache hit?           Cache miss → fan out:
+   → return instantly          ├─ Restaurant lookup (retry)
+                               └─ Dish lookup (retry)
+                                       │
+                               merge → respond
+                                       │
+                        async write-back to Redis (jittered TTL)
 ```
 
-Nothing fancy — the whole point was to actually build the fan-out + cache-aside pattern myself instead of just describing it in a system design interview.
+## 🔖 Build Batches
 
-### Stack
+Built incrementally, one working checkpoint at a time — not written in one
+sitting, so every design choice below has an actual "before/after" behind it.
 
-- **Go** — mainly because goroutines make the concurrency part clean to write
-- **Redis** — for caching search results (`go-redis/v9` client)
-- plain `net/http`, no framework — didn't need one for this
+`BATCH-1` `SETUP` `MODELS` — project init, `Restaurant`/`Dish`/`SearchResult` structs, a `main.go` that starts and exits.
 
-### How I actually built it (in case you want to build it yourself instead of copy-pasting)
+`BATCH-2` `HTTP` `SEQUENTIAL` — `/search` endpoint calling stubbed lookups one after another. Baseline latency measured here.
 
-I didn't write this all at once — I built it in stages so I could actually see each improvement working, rather than just writing "concurrency" on a resume and hoping nobody asks about it.
+`BATCH-3` `CONCURRENCY` `GOROUTINES` — both lookups moved into goroutines under a `WaitGroup`. Latency drops from sum → max. **This is the number behind the resume line.**
 
-1. **Got the basic project running first** — just structs for Restaurant/Dish/SearchResult, and a main.go that starts and stops. Nothing else.
-2. **Built the `/search` endpoint the dumb way first** — stub functions with `time.Sleep()` to fake real latency, called one after another. Timed it with curl so I had a "before" number.
-3. **Made it concurrent** — wrapped both stub calls in goroutines with a WaitGroup. Timed it again — latency dropped from roughly the sum of both calls to roughly the max of the two. This is the number I actually put in my head for interviews.
-4. **Added a timeout** so one slow call can't hang the whole request forever — tested this by making one stub sleep 2 seconds on purpose and watching it fail fast instead of hanging.
-5. **Added Redis** — spun up Redis in Docker, wrote a small Get/Set wrapper, wired it in as check-cache-first. First call to a query is slow, second call is basically instant.
-6. **Added retries** — made one of the stub functions fail on the first attempt (using a counter) just to prove the retry logic actually recovers from it.
-7. **Handled partial failures** — made the dish lookup always fail and checked that restaurant results still came back instead of the whole thing erroring out.
-8. **Cleaned it up** — added logging middleware, a `/healthz` endpoint, timeouts on the server itself, and jittered the cache TTL so a bunch of keys don't all expire at the exact same second.
+`BATCH-4` `TIMEOUTS` `CONTEXT` — shared context deadline so one slow dependency can't hang the whole request.
 
-If you're doing this yourself, I'd genuinely recommend going step by step like this instead of writing the whole thing in one sitting — you actually remember why each piece is there when you build it this way, which matters a lot more than the code itself when someone asks you about it later.
+`BATCH-5` `REDIS` `CACHE-ASIDE` — Redis wired in as check-cache-first; repeat queries return near-instantly.
 
-### Running it
+`BATCH-6` `RETRY` `RESILIENCE` — capped retry with backoff on transient lookup failures.
+
+`BATCH-7` `PARTIAL-FAILURE` `GRACEFUL-DEGRADATION` — one lookup failing no longer fails the whole request.
+
+`BATCH-8` `LOGGING` `HEALTHCHECK` `HARDENING` — structured logging, `/healthz`, server-level read/write timeouts, jittered cache TTL.
+
+## ▶️ Getting Started
 
 ```bash
 docker run -p 6379:6379 redis:7-alpine
@@ -81,26 +106,33 @@ curl "http://localhost:8080/search?q=biryani"
 curl "http://localhost:8080/healthz"
 ```
 
-First hit for a query is slower (goes to the "live" stub functions), anything after that within 5 minutes comes back from cache.
+First hit for a query goes to the (simulated) live path; anything within 5
+minutes after that comes back from cache.
 
-### What's real vs. fake here
+## 🔍 What's Stubbed vs. Real
 
-Honestly, `searchRestaurants` and `searchDishes` are just stubs returning made-up data — I didn't wire this up to a real database or Elasticsearch, since the point was the concurrency/caching/retry logic around them, not building an actual search index. In a real job, those two functions would be swapped for real DB/search calls, but everything around them (the parallel fetch, the caching, the failure handling) would stay basically the same.
+`searchRestaurants` and `searchDishes` return simulated data — there's no
+real database or search index behind this, since the point of the project
+is the concurrency/caching/failure-handling layer around them, not the
+search index itself. Those two functions are where real DB/Elasticsearch
+calls would slot in without changing anything else.
 
-### Things I'd get asked about, and how I'd answer
+## 🎯 Interview Notes
 
-**Why concurrency here specifically?**
-Because the restaurant lookup and dish lookup don't depend on each other — there's no reason to wait for one before starting the other. Running them in parallel means the total time is roughly whichever one takes longer, not both added together.
-
-**Why cache-aside and not something like write-through?**
-Search results don't need to be perfectly fresh — a few minutes of staleness is fine for a search feature, so it's simpler to just check-then-fetch-then-cache rather than keeping the cache updated on every write.
-
-**Why return partial results instead of failing?**
-Because a broken dish index shouldn't mean the user gets nothing back at all. Some results is better than an error page.
-
-**What does "production-grade" even mean in a small project like this?**
-Timeouts everywhere so nothing hangs forever, retries that are capped (not infinite — that would just make things worse under load), actual logs you could debug with, and a health check endpoint that isn't just decorative.
+- **Why concurrency here:** the two lookups are independent, so there's no
+  reason to serialize them — parallel execution drops latency to
+  `max(a, b)`.
+- **Why cache-aside over write-through:** search results tolerate a little
+  staleness, so check-then-cache is simpler and cheaper than keeping the
+  cache in lockstep with every write.
+- **Why return partial results:** a broken dish index shouldn't mean the
+  user gets nothing — some results beat an error page.
+- **What "production-grade" means here:** timeouts everywhere, capped (not
+  infinite) retries, structured logs, and a health check a load balancer
+  can actually use.
 
 ---
 
-One honest note: this is a personal project I built to *simulate* how Zomato/Swiggy-style search might work — I didn't actually work at either company. On my resume I'm listing it as a personal project, not real work experience, because that's the truth and it's an easy thing to get caught out on if asked directly.
+*Personal project inspired by how food-delivery search platforms operate —
+not a claim of employment at Zomato or Swiggy. Listed on my resume as a
+personal project, not work experience.*
