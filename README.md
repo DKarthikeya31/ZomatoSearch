@@ -24,7 +24,7 @@
 ## 🚀 Overview
 
 A backend search service modeled on how apps like Zomato or Swiggy might
-handle restaurant/dish search — built to actually be fast, not just
+handle restaurant/dish search built to actually be fast, not just
 functional. Every optimization here (concurrency, caching, retries,
 graceful degradation) was built incrementally and timed, so the resume
 line behind it is backed by real numbers, not just buzzwords.
