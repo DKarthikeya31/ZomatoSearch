@@ -213,7 +213,7 @@ calls would slot in without changing anything else.
   user gets nothing — some results beat an error page.
 - **What "production-grade" means here:** timeouts everywhere, capped (not
   infinite) retries, structured logs, and a health check a load balancer
-  can actually use.
+  can actually uses.
 
 ---
 
