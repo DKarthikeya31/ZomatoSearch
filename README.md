@@ -4,7 +4,7 @@
 
 ### Concurrent Search Backend for Restaurant & Dish Discovery
 
-*Cutting search latency in half by fanning out restaurant and dish lookups in parallel — with Redis caching and graceful failure handling on top.*
+**Cut search latency by ~50% by fanning out restaurant and dish lookups in parallel, with Redis caching and graceful failure handling on top.**
 
 ![Go](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat&logo=go&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-Cache--Aside-DC382D?style=flat&logo=redis&logoColor=white)
@@ -13,7 +13,7 @@
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat)
 ![Status](https://img.shields.io/badge/Status-Personal%20Project-yellow?style=flat)
 
-[Problem](#-problem) · [Solution](#-solution) · [Architecture](#-architecture) · [Build Batches](#-build-batches) · [Getting Started](#-getting-started) · [Interview Notes](#-interview-notes)
+[Impact Summary](#-impact-summary) · [Problem](#-problem) · [Solution](#-solution) · [Architecture](#-architecture) · [Build Process](#-build-process) · [Getting Started](#-getting-started) · [Interview Notes](#-interview-notes)
 
 <img src="assets/search_engine_emblem_banner.png" alt="ZomatoSearch banner" width="600">
 
@@ -21,32 +21,37 @@
 
 ---
 
-## 🚀 Overview
+## ⚡ Impact Summary
 
-A backend search service modeled on how apps like Zomato or Swiggy might
-handle restaurant/dish search built to actually be fast, not just
-functional. Every optimization here (concurrency, caching, retries,
-graceful degradation) was built incrementally and timed, so the resume
-line behind it is backed by real numbers, not just buzzwords.
+*For recruiters and hiring managers skimming this — the 15-second version:*
+
+| | |
+|---|---|
+| **What it is** | A Go backend that searches restaurants and dishes concurrently instead of sequentially |
+| **Core skill demonstrated** | Concurrency (goroutines/WaitGroups), caching strategy, fault-tolerant system design |
+| **Measured result** | Latency dropped from `a + b` (sequential) to `max(a, b)` (concurrent) — verified with real timing, not estimated |
+| **Production concerns handled** | Context timeouts, capped retries, partial-failure degradation, structured logging, health checks |
+| **Stack** | Go 1.22 · Redis (cache-aside) · net/http |
+
+> Built incrementally in 8 tracked batches (see below) so every design decision has a measurable before/after — this wasn't written in one sitting to look impressive on a resume.
+
+---
 
 ## 🧩 Problem
 
-A naive search implementation looks up restaurants, then looks up dishes,
-then combines them — sequentially. That means total response time is the
-**sum** of both lookups, and a single slow or failing dependency takes the
-whole request down with it. Neither is acceptable at any real scale.
+A naive search implementation looks up restaurants, then dishes, then combines them — **sequentially**. That means:
+- Total response time is the **sum** of both lookups.
+- A single slow or failing dependency takes the **whole request down** with it.
+
+Neither is acceptable at real scale.
 
 ## 💡 Solution
 
-- **Fan out, don't queue up.** Restaurant and dish lookups run concurrently
-  as goroutines, so total latency is roughly `max(a, b)` instead of `a + b`.
-- **Cache what's already been asked.** A Redis cache-aside layer returns
-  repeat queries instantly, with a jittered TTL so keys don't all expire in
-  the same instant under load.
-- **Expect things to fail, and don't collapse when they do.** Capped
-  retries recover from transient blips; if one lookup still fails, the
-  response returns whatever the other one found instead of erroring out
-  entirely.
+- **Fan out, don't queue up.** Restaurant and dish lookups run concurrently as goroutines, so total latency is roughly `max(a, b)` instead of `a + b`.
+- **Cache what's already been asked.** A Redis cache-aside layer returns repeat queries instantly, with a jittered TTL so keys don't all expire in the same instant under load.
+- **Expect things to fail, and don't collapse when they do.** Capped retries recover from transient blips; if one lookup still fails, the response returns whatever the other one found instead of erroring out entirely.
+
+---
 
 ## 🏗️ Architecture
 
@@ -74,49 +79,7 @@ whole request down with it. Neither is acceptable at any real scale.
                         async write-back to Redis (jittered TTL)
 ```
 
-## 🔖 Build Batches
-
-Built incrementally, one working checkpoint at a time — not written in one
-sitting, so every design choice below has an actual "before/after" behind it.
-
-`BATCH-1` `SETUP` `MODELS` — project init, `Restaurant`/`Dish`/`SearchResult` structs, a `main.go` that starts and exits.
-
-`BATCH-2` `HTTP` `SEQUENTIAL` — `/search` endpoint calling stubbed lookups one after another. Baseline latency measured here.
-
-`BATCH-3` `CONCURRENCY` `GOROUTINES` — both lookups moved into goroutines under a `WaitGroup`. Latency drops from sum → max. **This is the number behind the resume line.**
-
-`BATCH-4` `TIMEOUTS` `CONTEXT` — shared context deadline so one slow dependency can't hang the whole request.
-
-`BATCH-5` `REDIS` `CACHE-ASIDE` — Redis wired in as check-cache-first; repeat queries return near-instantly.
-
-`BATCH-6` `RETRY` `RESILIENCE` — capped retry with backoff on transient lookup failures.
-
-`BATCH-7` `PARTIAL-FAILURE` `GRACEFUL-DEGRADATION` — one lookup failing no longer fails the whole request.
-
-`BATCH-8` `LOGGING` `HEALTHCHECK` `HARDENING` — structured logging, `/healthz`, server-level read/write timeouts, jittered cache TTL.
-
-## 🔗 End-to-End Microservices Workflow
-
-This project runs as a single binary for simplicity, but it's designed the
-way a real microservices split would look. Here's how it maps end to end:
-
-1. **Client** sends `GET /search?q=biryani`.
-2. **API Gateway** (in a real split, a separate service) authenticates the
-   request and routes it to the Search Orchestrator.
-3. **Search Orchestrator** checks Redis first (cache-aside). On a hit, it
-   returns immediately — no downstream services are touched.
-4. On a **cache miss**, the orchestrator fans out concurrently to two
-   independent domain services: **Restaurant Service** and **Dish Service**.
-5. Each domain service owns its own data (in a real split: its own DB),
-   and each call is wrapped in a capped retry in case of a transient blip.
-6. The orchestrator merges whatever comes back — even if only one service
-   responded successfully — and returns the combined result to the client.
-7. The result is written back to Redis **asynchronously**, so the client
-   isn't kept waiting on the cache write.
-
 ### System context diagram
-Shows the service as a black box and who/what it talks to — a bird's-eye
-view before getting into internals.
 
 ```mermaid
 C4Context
@@ -133,7 +96,6 @@ C4Context
 ```
 
 ### Component diagram
-Zooms into the service itself and its internal building blocks.
 
 ```mermaid
 graph TD
@@ -147,8 +109,6 @@ graph TD
 ```
 
 ### Sequence diagram
-Shows the actual request timeline, including the cache-miss branch and
-concurrent fan-out.
 
 ```mermaid
 sequenceDiagram
@@ -177,6 +137,35 @@ sequenceDiagram
   end
 ```
 
+### End-to-end request flow
+
+1. **Client** sends `GET /search?q=biryani`.
+2. **API Gateway** (a separate service in a real split) authenticates the request and routes it to the Search Orchestrator.
+3. **Search Orchestrator** checks Redis first (cache-aside). On a hit, it returns immediately — no downstream services touched.
+4. On a **cache miss**, the orchestrator fans out concurrently to two independent domain services: **Restaurant Service** and **Dish Service**.
+5. Each domain service owns its own data (its own DB in a real split), and each call is wrapped in a capped retry for transient blips.
+6. The orchestrator merges whatever comes back — even if only one service responded successfully — and returns the combined result.
+7. The result is written back to Redis **asynchronously**, so the client isn't kept waiting on the cache write.
+
+---
+
+## 🔖 Build Process
+
+Built incrementally, one working checkpoint at a time — every design choice below has an actual before/after behind it, not a single commit dump.
+
+| Batch | Focus | What it added |
+|---|---|---|
+| 1 | Setup & Models | Project init, `Restaurant`/`Dish`/`SearchResult` structs, minimal `main.go` |
+| 2 | HTTP (Sequential) | `/search` endpoint calling stubbed lookups one after another — **baseline latency measured here** |
+| 3 | Concurrency | Both lookups moved into goroutines under a `WaitGroup` — **latency drops from sum → max; this is the number behind the resume line** |
+| 4 | Timeouts / Context | Shared context deadline so one slow dependency can't hang the whole request |
+| 5 | Redis Cache-Aside | Check-cache-first wired in; repeat queries return near-instantly |
+| 6 | Retry / Resilience | Capped retry with backoff on transient lookup failures |
+| 7 | Partial-Failure Handling | One lookup failing no longer fails the whole request |
+| 8 | Hardening | Structured logging, `/healthz`, server-level read/write timeouts, jittered cache TTL |
+
+---
+
 ## ▶️ Getting Started
 
 ```bash
@@ -190,33 +179,27 @@ curl "http://localhost:8080/search?q=biryani"
 curl "http://localhost:8080/healthz"
 ```
 
-First hit for a query goes to the (simulated) live path; anything within 5
-minutes after that comes back from cache.
+First hit for a query goes to the (simulated) live path; anything within 5 minutes after that comes back from cache.
 
 ## 🔍 What's Stubbed vs. Real
 
-`searchRestaurants` and `searchDishes` return simulated data — there's no
-real database or search index behind this, since the point of the project
-is the concurrency/caching/failure-handling layer around them, not the
-search index itself. Those two functions are where real DB/Elasticsearch
-calls would slot in without changing anything else.
-
-## 🎯 Interview Notes
-
-- **Why concurrency here:** the two lookups are independent, so there's no
-  reason to serialize them — parallel execution drops latency to
-  `max(a, b)`.
-- **Why cache-aside over write-through:** search results tolerate a little
-  staleness, so check-then-cache is simpler and cheaper than keeping the
-  cache in lockstep with every write.
-- **Why return partial results:** a broken dish index shouldn't mean the
-  user gets nothing — some results beat an error page.
-- **What "production-grade" means here:** timeouts everywhere, capped (not
-  infinite) retries, structured logs, and a health check a load balancer
-  can actually uses.
+`searchRestaurants` and `searchDishes` return simulated data — there's no real database or search index behind this. The point of the project is the concurrency/caching/failure-handling layer around them, not the search index itself. Those two functions are where real DB/Elasticsearch calls would slot in without changing anything else downstream.
 
 ---
 
-*Personal project inspired by how food-delivery search platforms operate —
-not a claim of employment at Zomato or Swiggy. Listed on my resume as a
-personal project, not work experience.*
+## 🎯 Interview Notes
+
+Quick answers to the questions this project is designed to invite:
+
+- **Why concurrency here?** The two lookups are independent, so there's no reason to serialize them — parallel execution drops latency to `max(a, b)`.
+- **Why cache-aside over write-through?** Search results tolerate a little staleness, so check-then-cache is simpler and cheaper than keeping the cache in lockstep with every write.
+- **Why return partial results?** A broken dish index shouldn't mean the user gets nothing — some results beat an error page.
+- **What does "production-grade" mean here?** Timeouts everywhere, capped (not infinite) retries, structured logs, and a health check a load balancer can actually use.
+
+---
+
+<div align="center">
+
+*Personal project inspired by how food-delivery search platforms operate — not a claim of employment at Zomato or Swiggy. Listed on my resume as a personal project, not work experience.*
+
+</div>
