@@ -4,7 +4,7 @@
 
 ### Concurrent Search Backend for Restaurant & Dish Discovery
 
-**Cut search latency by ~50% by fanning out restaurant and dish lookups in parallel, with Redis caching and graceful failure handling on top.**
+**Cut Search latency by ~50% by fanning out restaurant and dish lookups in parallel, with Redis caching and graceful failure handling on top.**
 
 ![Go](https://img.shields.io/badge/Go-1.22-00ADD8?style=flat&logo=go&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-Cache--Aside-DC382D?style=flat&logo=redis&logoColor=white)
