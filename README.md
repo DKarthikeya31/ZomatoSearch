@@ -187,7 +187,7 @@ First hit for a query goes to the (simulated) live path; anything within 5 minut
 
 ---
 
-## 🎯 Interview Notes
+## 🎯 Interview Note
 
 Quick answers to the questions this project is designed to invite:
 
