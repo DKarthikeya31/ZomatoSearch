@@ -2,7 +2,7 @@
 
 # 📦 ZomatoSearch
 
-### Concurrent Search Backend for Restaurant & Dish Discovery
+### Concurrent Search Backend for Restaurant & Dish Discoverys
 
 **Cut Search latency by ~60% by fanning out restaurant and dish lookups in parallel, with Redis caching and graceful failure handling on top.**
 
