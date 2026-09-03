@@ -70,7 +70,7 @@ Neither is acceptable at real scale.
                        │
           ┌────────────┴─────────────┐
           ▼                          ▼
-   Redis Cache hit?           Cache miss → fan out:
+   Redis Cache hits?           Cache miss → fan out:
    → return instantly          ├─ Restaurant lookup (retry)
                                └─ Dish lookup (retry)
                                        │
