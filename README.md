@@ -21,7 +21,7 @@
 
 ---
 
-## ⚡ Impact Summary
+## ⚡ Summary
 
 *For recruiters and hiring managers skimming this — the 15-second version:*
 
